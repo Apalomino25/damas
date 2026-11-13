@@ -169,9 +169,13 @@ class Juego extends Phaser.Scene {
     this.audio = null;
     this.musica = new Audio('sonido/fondo.mp3');
     this.musica.loop = true;
-    this.musica.volume = 0.12;
+    this.musica.volume = 0.3;
     this.sonidoComer = new Audio('sonido/comer.mp3');
     this.sonidoComer.volume = 0.7;
+    this.sonidoMovimiento = new Audio('sonido/movimiento.mp3');
+    this.sonidoMovimiento.volume = 0.55;
+    this.sonidoDama = new Audio('sonido/dama.mp3');
+    this.sonidoDama.volume = 0.65;
     this.g = this.add.graphics();
     this.texto = this.add.text(14, 570, '', { fontSize: '20px', color: '#ffffff' });
     this.input.on('pointerdown', (p) => this.alHacerClic(p));
@@ -294,13 +298,12 @@ class Juego extends Phaser.Scene {
       window.enviarMovimiento(m, r.sigue);
     }
 
-    // sonido según lo que pasó
-    if (m.captura && this.sonidoActivado) {
-      this.sonidoComer.currentTime = 0;
-      this.sonidoComer.play().catch(() => {});
+    // Los sonidos se reproducen para cualquier movimiento, incluido el del rival.
+    if (this.sonidoActivado) {
+      this.reproducirEfecto(this.sonidoMovimiento);
+      if (m.captura) this.reproducirEfecto(this.sonidoComer);
+      if (r.corono) this.reproducirEfecto(this.sonidoDama);
     }
-    if (r.corono) this.sonar('corona');
-    else if (!m.captura) this.sonar('mover');
     this.efectoMovimiento(m, r.corono);
 
     if (r.sigue) {
@@ -313,6 +316,11 @@ class Juego extends Phaser.Scene {
     }
     this.dibujar();
     this.siguiente();
+  }
+
+  reproducirEfecto(audio) {
+    audio.currentTime = 0;
+    audio.play().catch(() => {});
   }
 
   siguiente() {
