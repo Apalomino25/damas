@@ -2,358 +2,104 @@
 <html lang="es">
 <head>
   <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
   <title>Damas</title>
+  <style>
+    body {
+      align-items: center;
+      background: #1b1b1f;
+      color: #ffffff;
+      display: flex;
+      flex-direction: column;
+      font-family: Arial, sans-serif;
+      margin: 0;
+      min-height: 100vh;
+    }
+
+    #menu {
+      margin: 48px 16px;
+      max-width: 420px;
+      text-align: center;
+      width: calc(100% - 32px);
+    }
+
+    button, input {
+      border: 0;
+      border-radius: 6px;
+      box-sizing: border-box;
+      font-size: 16px;
+      margin: 6px;
+      padding: 12px 16px;
+    }
+
+    button {
+      background: #ffd447;
+      color: #1b1b1f;
+      cursor: pointer;
+    }
+
+    button:disabled {
+      cursor: wait;
+      opacity: 0.6;
+    }
+
+    input {
+      text-transform: uppercase;
+      width: 120px;
+    }
+
+    #onlinePanel[hidden], #game[hidden] {
+      display: none;
+    }
+
+    #onlinePanel {
+      margin-top: 16px;
+    }
+
+    #status {
+      min-height: 24px;
+    }
+
+    #game {
+      margin: 16px auto;
+      max-width: 100%;
+      overflow: auto;
+    }
+
+    #musicButton {
+      background: #34343a;
+      color: #fff;
+      font-size: 14px;
+      margin-top: 0;
+    }
+
+    canvas {
+      display: block;
+      max-width: 100%;
+    }
+  </style>
 </head>
 <body>
+  <main id="menu">
+    <h1>Damas</h1>
+    <p>Elige cómo quieres jugar</p>
+    <button id="soloButton" type="button">Jugar contra la IA</button>
+    <button id="multiButton" type="button">Multijugador</button>
+
+    <section id="onlinePanel" hidden>
+      <button id="createRoomButton" type="button">Crear sala</button>
+      <p>O ingresa el código de una sala:</p>
+      <input id="roomCodeInput" aria-label="Código de sala" maxlength="4" autocomplete="off">
+      <button id="joinRoomButton" type="button">Unirse</button>
+    </section>
+
+    <p id="status" role="status" aria-live="polite"></p>
+  </main>
+  <div id="game" hidden>
+    <button id="musicButton" type="button" aria-pressed="true">♫ Sonido: activado</button>
+  </div>
+
   <script src="https://cdnjs.cloudflare.com/ajax/libs/phaser/3.80.1/phaser.min.js"></script>
-  <script>
-    const TAM = 70;
-    const PROFUNDIDAD = [0, 2, 4]; // 0 = al azar
-    const NOMBRES = ['Fácil', 'Medio', 'Difícil'];
-
-    // ---------- TABLERO ----------
-    function crearTablero() {
-      const tablero = [];
-      for (let f = 0; f < 8; f++) {
-        tablero.push([]);
-        for (let c = 0; c < 8; c++) {
-          let valor = 0;
-          if ((f + c) % 2 === 1) {
-            if (f < 3) valor = -1;       // fichas de la IA (arriba)
-            else if (f > 4) valor = 1;   // tus fichas (abajo)
-          }
-          tablero[f].push(valor);
-        }
-      }
-      return tablero;
-    }
-
-    function dentro(f, c) {
-      return f >= 0 && f < 8 && c >= 0 && c < 8;
-    }
-
-    // Una ficha normal va en una dirección; una dama, en las dos
-    function direcciones(ficha) {
-      if (Math.abs(ficha) === 2) return [-1, 1];
-      return [ficha > 0 ? -1 : 1];
-    }
-
-    // ---------- REGLAS ----------
-    function movimientosSimples(tablero, f, c) {
-      const ficha = tablero[f][c];
-      const dama = Math.abs(ficha) === 2;
-      const destinos = [];
-      for (const dir of direcciones(ficha)) {
-        for (const dc of [-1, 1]) {
-          let nf = f + dir, nc = c + dc;
-          while (dentro(nf, nc) && tablero[nf][nc] === 0) {
-            destinos.push({ f: nf, c: nc, captura: null });
-            if (!dama) break;          // la ficha normal avanza solo una casilla
-            nf += dir; nc += dc;       // la dama sigue por la diagonal
-          }
-        }
-      }
-      return destinos;
-    }
-
-    function saltos(tablero, f, c) {
-      const ficha = tablero[f][c];
-      const dama = Math.abs(ficha) === 2;
-      const lista = [];
-      for (const dir of direcciones(ficha)) {
-        for (const dc of [-1, 1]) {
-          let mf = f + dir, mc = c + dc;
-
-          // la dama recorre las casillas vacías hasta encontrar una pieza
-          if (dama) {
-            while (dentro(mf, mc) && tablero[mf][mc] === 0) { mf += dir; mc += dc; }
-          }
-
-          // ¿hay una pieza rival?
-          if (!dentro(mf, mc) || tablero[mf][mc] * ficha >= 0) continue;
-
-          // casillas de aterrizaje: las vacías justo después de la pieza
-          let nf = mf + dir, nc = mc + dc;
-          while (dentro(nf, nc) && tablero[nf][nc] === 0) {
-            lista.push({ f: nf, c: nc, captura: { f: mf, c: mc } });
-            if (!dama) break;
-            nf += dir; nc += dc;
-          }
-        }
-      }
-      return lista;
-    }
-
-    // Todos los movimientos de un bando.
-    // La captura es OPCIONAL: se devuelven saltos y movimientos normales.
-    // "forzada" = [f, c] de la ficha que está en medio de una cadena de saltos
-    // (en ese caso solo puede seguir saltando).
-    function todosLosMovimientos(tablero, lado, forzada) {
-      const listaSaltos = [];
-      const listaSimples = [];
-      for (let f = 0; f < 8; f++) {
-        for (let c = 0; c < 8; c++) {
-          if (tablero[f][c] * lado <= 0) continue;
-          if (forzada && (forzada[0] !== f || forzada[1] !== c)) continue;
-          for (const d of saltos(tablero, f, c)) {
-            listaSaltos.push({ desdeF: f, desdeC: c, ...d });
-          }
-          for (const d of movimientosSimples(tablero, f, c)) {
-            listaSimples.push({ desdeF: f, desdeC: c, ...d });
-          }
-        }
-      }
-      if (forzada) return listaSaltos;
-      return listaSaltos.concat(listaSimples);
-    }
-
-    // Aplica un movimiento sobre una COPIA del tablero
-    function aplicar(tablero, m) {
-      const nt = tablero.map(fila => fila.slice());
-      let ficha = nt[m.desdeF][m.desdeC];
-      nt[m.desdeF][m.desdeC] = 0;
-
-      let corono = false;
-      if (ficha === 1 && m.f === 0) { ficha = 2; corono = true; }
-      if (ficha === -1 && m.f === 7) { ficha = -2; corono = true; }
-
-      nt[m.f][m.c] = ficha;
-      if (m.captura) nt[m.captura.f][m.captura.c] = 0;
-
-      // el salto continúa si capturó, no se coronó y puede capturar otra vez
-      const sigue = !!m.captura && !corono && saltos(nt, m.f, m.c).length > 0;
-      return { tablero: nt, sigue, corono };
-    }
-
-    // ---------- INTELIGENCIA ARTIFICIAL ----------
-    // Puntuación del tablero: positivo = bueno para la IA
-    function evaluar(tablero) {
-      let s = 0;
-      for (let f = 0; f < 8; f++) {
-        for (let c = 0; c < 8; c++) {
-          const v = tablero[f][c];
-          if (v === 0) continue;
-          let x = Math.abs(v) === 2 ? 160 : 100;
-          if (v === -1) x += f * 3;
-          if (v === 1) x += (7 - f) * 3;
-          s += v < 0 ? x : -x;
-        }
-      }
-      return s;
-    }
-
-    // Minimax con poda alfa-beta
-    function buscar(tablero, lado, prof, forzada, alfa, beta) {
-      const movs = todosLosMovimientos(tablero, lado, forzada);
-      if (movs.length === 0) return lado === -1 ? -9999 - prof : 9999 + prof;
-      if (prof <= 0) return evaluar(tablero);
-
-      const maximiza = lado === -1; // la IA maximiza, tú minimizas
-      let mejor = maximiza ? -Infinity : Infinity;
-      for (const m of movs) {
-        const r = aplicar(tablero, m);
-        const v = r.sigue
-          ? buscar(r.tablero, lado, prof, [m.f, m.c], alfa, beta)
-          : buscar(r.tablero, -lado, prof - 1, null, alfa, beta);
-        if (maximiza) { mejor = Math.max(mejor, v); alfa = Math.max(alfa, v); }
-        else          { mejor = Math.min(mejor, v); beta = Math.min(beta, v); }
-        if (beta <= alfa) break;
-      }
-      return mejor;
-    }
-
-    // ---------- ESCENA DE PHASER ----------
-    class Juego extends Phaser.Scene {
-      // Carga de sonidos (carpeta "sonidos" junto a index.html).
-      // Si un archivo no existe, el juego sigue funcionando sin ese sonido.
-      preload() {
-        this.load.audio('mover', 'sonidos/mover.mp3');
-        this.load.audio('captura', 'sonidos/captura.mp3');
-        this.load.audio('corona', 'sonidos/corona.mp3');
-      }
-
-      create() {
-        this.nivel = 0;
-        this.g = this.add.graphics();
-        this.texto = this.add.text(14, 570, '', { fontSize: '20px', color: '#ffffff' });
-        this.input.on('pointerdown', (p) => this.alHacerClic(p));
-        this.iniciar();
-      }
-
-      sonar(clave) {
-        if (this.cache.audio.exists(clave)) {
-          this.sound.play(clave, { volume: 0.6 });
-        }
-      }
-
-      iniciar() {
-        if (this.ov) { this.ov.destroy(); this.ov = null; }
-        this.tablero = crearTablero();
-        this.seleccion = null;
-        this.forzada = null;
-        this.turno = 1;      // 1 = tú, -1 = IA
-        this.fin = false;
-        this.dibujar();
-        this.estado('Tu turno');
-      }
-
-      estado(msg) {
-        this.texto.setText(`Nivel ${this.nivel + 1}/${PROFUNDIDAD.length} ${NOMBRES[this.nivel]} · ${msg}`);
-      }
-
-      despuesDeMover(m) {
-        const r = aplicar(this.tablero, m);
-        this.tablero = r.tablero;
-
-        // sonido según lo que pasó
-        if (r.corono) this.sonar('corona');
-        else if (m.captura) this.sonar('captura');
-        else this.sonar('mover');
-
-        if (r.sigue) {
-          this.forzada = [m.f, m.c];
-          this.seleccion = this.turno === 1 ? [m.f, m.c] : null;
-        } else {
-          this.forzada = null;
-          this.seleccion = null;
-          this.turno = -this.turno;
-        }
-        this.dibujar();
-        this.siguiente();
-      }
-
-      siguiente() {
-        const movs = todosLosMovimientos(this.tablero, this.turno, this.forzada);
-        if (movs.length === 0) {
-          this.fin = true;
-          this.mostrarFin(this.turno === -1); // si la IA no puede mover, ganaste
-        } else if (this.turno === -1) {
-          this.estado('La IA está pensando...');
-          this.time.delayedCall(500, () => this.jugarIA());
-        } else {
-          this.estado(this.forzada ? 'Sigue saltando' : 'Tu turno');
-        }
-      }
-
-      jugarIA() {
-        const movs = todosLosMovimientos(this.tablero, -1, this.forzada);
-        const prof = PROFUNDIDAD[this.nivel];
-        let candidatos = movs;
-
-        if (prof > 0) {
-          let mejorV = -Infinity;
-          candidatos = [];
-          for (const m of movs) {
-            const r = aplicar(this.tablero, m);
-            const v = r.sigue
-              ? buscar(r.tablero, -1, prof, [m.f, m.c], -Infinity, Infinity)
-              : buscar(r.tablero, 1, prof - 1, null, -Infinity, Infinity);
-            if (v > mejorV) { mejorV = v; candidatos = [m]; }
-            else if (v === mejorV) candidatos.push(m);
-          }
-        }
-        // entre los mejores (o entre todos, si es aleatoria) elige uno al azar
-        const m = candidatos[Math.floor(Math.random() * candidatos.length)];
-        this.despuesDeMover(m);
-      }
-
-      mostrarFin(gano) {
-        const ultimo = this.nivel === PROFUNDIDAD.length - 1;
-        const titulo = gano ? (ultimo ? '¡Eres el campeón!' : '¡Nivel superado!') : 'Perdiste esta vez';
-        const boton = gano ? (ultimo ? 'Jugar de nuevo' : 'Siguiente nivel') : 'Reintentar nivel';
-
-        const ov = this.add.container(0, 0);
-        this.ov = ov;
-        ov.add(this.add.rectangle(280, 280, 560, 560, 0x000000, 0.7));
-        ov.add(this.add.text(280, 240, titulo, { fontSize: '36px', color: '#ffffff' }).setOrigin(0.5));
-
-        const b = this.add.text(280, 320, boton, {
-          fontSize: '26px', color: '#1b1b1f', backgroundColor: '#ffd447', padding: { x: 20, y: 10 }
-        }).setOrigin(0.5).setInteractive({ useHandCursor: true });
-
-        b.on('pointerdown', () => {
-          this.time.delayedCall(50, () => {
-            if (gano) this.nivel = ultimo ? 0 : this.nivel + 1;
-            this.iniciar();
-          });
-        });
-        ov.add(b);
-      }
-
-      alHacerClic(p) {
-        if (this.fin || this.turno !== 1) return;
-        const c = Math.floor(p.x / TAM);
-        const f = Math.floor(p.y / TAM);
-        if (f < 0 || f > 7 || c < 0 || c > 7) return;
-
-        const movs = todosLosMovimientos(this.tablero, 1, this.forzada);
-
-        // ¿clic en un destino de la ficha seleccionada?
-        if (this.seleccion) {
-          const [sf, sc] = this.seleccion;
-          const m = movs.find(m => m.desdeF === sf && m.desdeC === sc && m.f === f && m.c === c);
-          if (m) { this.despuesDeMover(m); return; }
-        }
-
-        // solo se seleccionan fichas con movimientos válidos
-        if (movs.some(m => m.desdeF === f && m.desdeC === c)) {
-          this.seleccion = [f, c];
-        } else if (!this.forzada) {
-          this.seleccion = null;
-        }
-        this.dibujar();
-      }
-
-      dibujar() {
-        this.g.clear();
-
-        for (let f = 0; f < 8; f++) {
-          for (let c = 0; c < 8; c++) {
-            // casilla
-            const color = (f + c) % 2 === 0 ? 0xf0d9b5 : 0xb58863;
-            this.g.fillStyle(color, 1);
-            this.g.fillRect(c * TAM, f * TAM, TAM, TAM);
-
-            // resaltado de la ficha seleccionada
-            if (this.seleccion && this.seleccion[0] === f && this.seleccion[1] === c) {
-              this.g.fillStyle(0xffe066, 0.6);
-              this.g.fillRect(c * TAM, f * TAM, TAM, TAM);
-            }
-
-            // ficha
-            const valor = this.tablero[f][c];
-            if (valor !== 0) {
-              const x = c * TAM + TAM / 2;
-              const y = f * TAM + TAM / 2;
-              this.g.fillStyle(valor > 0 ? 0xd64545 : 0x2b2b2b, 1);
-              this.g.fillCircle(x, y, 28);
-              if (Math.abs(valor) === 2) {   // la dama lleva un círculo dorado
-                this.g.fillStyle(0xffd447, 1);
-                this.g.fillCircle(x, y, 12);
-              }
-            }
-          }
-        }
-
-        // destinos posibles (verde = movimiento, naranja = captura)
-        if (this.seleccion && this.turno === 1) {
-          const [sf, sc] = this.seleccion;
-          const movs = todosLosMovimientos(this.tablero, 1, this.forzada)
-            .filter(m => m.desdeF === sf && m.desdeC === sc);
-          for (const m of movs) {
-            this.g.fillStyle(m.captura ? 0xff9f1c : 0x3ddc84, 0.9);
-            this.g.fillCircle(m.c * TAM + TAM / 2, m.f * TAM + TAM / 2, 11);
-          }
-        }
-      }
-    }
-
-    new Phaser.Game({
-      type: Phaser.AUTO,
-      width: 560,
-      height: 600,
-      scene: Juego
-    });
-  </script>
+  <script src="script.js"></script>
 </body>
 </html>
